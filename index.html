@@ -83,7 +83,7 @@
     </script>
 </head>
 <body>
-    <div id="loading">Loading 3D Engine...</div>
+    <div id="loading">Loading...</div>
 
     <div class="guide">
         <strong>🎮 조작법</strong><br>
@@ -116,14 +116,12 @@
     </div>
 
     <div id="win-message">🎉 PERFECT SHADOW! 🎉</div>
-
     <div id="canvas-container"></div>
 
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // --- 전역 변수 ---
         const GRID_SIZE = 3;
         let scene, camera, renderer, controls;
         let cubes = []; 
@@ -131,64 +129,67 @@
         let targetData = []; 
         let targetShadows = { top: [], front: [], side: [] };
         
+        // 최적화를 위한 지오메트리/재질 재사용
+        let boxGeometry;
+        let filledMaterial;
+        let emptyMaterial;
+        let edgeGeometry;
+        let edgeMaterial;
+
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        // --- 초기화 및 실행 ---
         try {
             init();
             animate();
-            document.getElementById('loading').style.display = 'none'; // 로딩 완료 시 숨김
+            document.getElementById('loading').style.display = 'none';
         } catch (error) {
             console.error(error);
             document.getElementById('loading').innerText = "Error: " + error.message;
-            document.getElementById('loading').style.color = "#ff416c";
         }
 
         function init() {
-            // 씬
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x202025);
 
-            // 카메라
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(6, 5, 6);
             camera.lookAt(0, 0, 0);
 
-            // 렌더러
             const container = document.getElementById('canvas-container');
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // 조명
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight.position.set(5, 10, 7);
             scene.add(dirLight);
 
-            // 컨트롤
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
 
-            // 이벤트 리스너
+            // 자원 미리 생성 (성능 최적화)
+            boxGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+            edgeGeometry = new THREE.EdgesGeometry(boxGeometry);
+            filledMaterial = new THREE.MeshLambertMaterial({ color: 0x4facfe });
+            emptyMaterial = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1, wireframe: true });
+            edgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('pointerdown', onMouseClick);
             
             document.getElementById('btn-new').addEventListener('click', initGame);
             document.getElementById('btn-reset').addEventListener('click', clearGrid);
 
-            // 데이터 구조 초기화 (중요: undefined 방지)
             resetPlayerGrid();
             targetData = createEmptyGrid();
             
-            // 첫 게임 시작
             initGame();
         }
 
-        // --- 게임 로직 ---
         function initGame() {
             document.getElementById('win-message').style.display = 'none';
             generateRandomTarget();
@@ -207,14 +208,10 @@
         function generateRandomTarget() {
             targetData = createEmptyGrid();
             let count = 0;
-            // 100번 시도하여 최소 3개 이상의 블록 생성
             for(let attempt=0; attempt<100; attempt++) {
                 if(count >= 3) break;
-                
-                // 다시 초기화 후 시도
                 targetData = createEmptyGrid();
                 count = 0;
-                
                 for(let x=0; x<GRID_SIZE; x++){
                     for(let y=0; y<GRID_SIZE; y++){
                         for(let z=0; z<GRID_SIZE; z++){
@@ -261,15 +258,11 @@
         }
 
         function getShadowMap(data, viewType) {
-            // 안전장치: 데이터가 없으면 빈 맵 반환
             if (!data) return Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
-
             let map = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
-            
             for(let x=0; x<GRID_SIZE; x++){
                 for(let y=0; y<GRID_SIZE; y++){
                     for(let z=0; z<GRID_SIZE; z++){
-                        // 배열 범위 체크 (undefined 에러 방지)
                         if (data[x] && data[x][y] && data[x][y][z] === 1) {
                             if(viewType === 'top') map[z][x] = 1;
                             if(viewType === 'front') map[y][x] = 1;
@@ -281,34 +274,32 @@
             return map;
         }
 
-        // --- 렌더링 ---
+        // --- 렌더링 (최적화됨) ---
         function renderGrid() {
+            // 기존 큐브 정리
             cubes.forEach(mesh => scene.remove(mesh));
             cubes = [];
 
-            const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-            const filledMaterial = new THREE.MeshLambertMaterial({ color: 0x4facfe });
-            const emptyMaterial = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.2, wireframe: true });
-            
             const offset = (GRID_SIZE - 1) / 2;
 
             for(let x=0; x<GRID_SIZE; x++){
                 for(let y=0; y<GRID_SIZE; y++){
                     for(let z=0; z<GRID_SIZE; z++){
                         const isFilled = gridData[x][y][z] === 1;
-                        const cube = new THREE.Mesh(geometry, isFilled ? filledMaterial : emptyMaterial);
+                        
+                        // 자원 재사용으로 메모리 낭비 방지
+                        const cube = new THREE.Mesh(boxGeometry, isFilled ? filledMaterial : emptyMaterial);
                         
                         cube.position.set(x - offset, y - offset, z - offset);
-                        cube.userData = { x, y, z, isFilled };
+                        cube.userData = { x, y, z }; // 데이터만 저장 (상태는 gridData에서 관리)
                         
                         scene.add(cube);
                         cubes.push(cube);
 
                         if (isFilled) {
-                            const edges = new THREE.LineSegments(
-                                new THREE.EdgesGeometry(geometry), 
-                                new THREE.LineBasicMaterial({ color: 0xffffff })
-                            );
+                            const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+                            // 레이캐스터가 선을 무시하도록 설정 (중요 버그 수정)
+                            edges.raycast = () => {}; 
                             cube.add(edges);
                         }
                     }
@@ -316,20 +307,30 @@
             }
         }
 
+        // --- 마우스 클릭 핸들러 (버그 수정됨) ---
         function onMouseClick(event) {
+            // UI 클릭 방지
             if (event.target.closest('#ui-layer') || event.target.closest('#controls')) return;
 
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(cubes);
+            
+            // 재귀(recursive)를 false로 설정하여 박스만 감지하고 내부 선(Edge)은 무시
+            const intersects = raycaster.intersectObjects(cubes, false);
 
             if (intersects.length > 0) {
                 const object = intersects[0].object;
-                const { x, y, z, isFilled } = object.userData;
+                const { x, y, z } = object.userData;
                 
-                gridData[x][y][z] = isFilled ? 0 : 1;
+                // 데이터 기반 토글 (가장 확실한 방법)
+                if (gridData[x][y][z] === 1) {
+                    gridData[x][y][z] = 0; // 삭제
+                } else {
+                    gridData[x][y][z] = 1; // 생성
+                }
+                
                 renderGrid();
                 updateUI();
                 checkWin();
@@ -337,9 +338,7 @@
         }
 
         function updateUI() {
-            // 데이터가 준비되지 않았으면 중단
             if (!targetShadows.top || targetShadows.top.length === 0) return;
-
             const pShadows = calculatePlayerShadows();
             drawGridUI('grid-top', targetShadows.top, pShadows.top);
             drawGridUI('grid-front', targetShadows.front, pShadows.front);
@@ -357,7 +356,6 @@
                     div.className = 'cell';
                     
                     let tVal, pVal;
-
                     if (elementId === 'grid-top') {
                         tVal = targetS[r][c]; pVal = playerS[r][c];
                     } else {
@@ -385,7 +383,10 @@
                 
                 document.getElementById('win-message').style.display = 'block';
                 cubes.forEach(c => {
-                    if(c.userData.isFilled) c.material.color.setHex(0x00f260);
+                    // 승리 시 색상 변경 로직 (재질 복제 필요)
+                    if(gridData[c.userData.x][c.userData.y][c.userData.z] === 1) {
+                         c.material = new THREE.MeshLambertMaterial({ color: 0x00f260 });
+                    }
                 });
             }
         }

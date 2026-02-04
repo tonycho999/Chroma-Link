@@ -2,106 +2,101 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chroma Link - 색채 혼합 퍼즐</title>
+    <title>Chroma Link - Advanced Logic Puzzle</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .cell { width: 60px; height: 60px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
-        .target { width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; }
-        .bg-none { background-color: #1a1a1a; }
-        .bg-red { background-color: #ff4d4d; box-shadow: 0 0 15px #ff4d4d; }
-        .bg-green { background-color: #4dff4d; box-shadow: 0 0 15px #4dff4d; }
-        .bg-blue { background-color: #4d4dff; box-shadow: 0 0 15px #4d4dff; }
+        :root { --cell-size: 60px; }
+        .grid-wrapper { display: grid; grid-template-columns: 40px repeat(5, var(--cell-size)) 40px; gap: 4px; }
+        .cell { width: var(--cell-size); height: var(--cell-size); background: #222; position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 4px; border: 1px solid #333; }
+        .hint { width: 40px; height: 60px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+        .mirror-slash { width: 80%; height: 4px; background: #aaa; transform: rotate(-45deg); border-radius: 2px; box-shadow: 0 0 8px white; }
+        .mirror-backslash { width: 80%; height: 4px; background: #aaa; transform: rotate(45deg); border-radius: 2px; box-shadow: 0 0 8px white; }
+        /* 빛의 빔 시각화 */
+        .beam-h { position: absolute; width: 100%; height: 4px; opacity: 0.6; z-index: 1; pointer-events: none; }
+        .beam-v { position: absolute; width: 4px; height: 100%; opacity: 0.6; z-index: 1; pointer-events: none; }
     </style>
 </head>
-<body class="bg-zinc-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-zinc-950 text-white min-h-screen flex flex-col items-center py-10">
 
-    <div class="text-center mb-8">
-        <h1 class="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-green-500 to-blue-500">
-            CHROMA LINK
-        </h1>
-        <p class="text-zinc-400 mt-2">빈칸을 클릭해 R-G-B 광원을 배치하고 하단의 목표 색상을 만드세요!</p>
+    <div class="mb-6 text-center">
+        <h1 class="text-3xl font-black mb-2 text-indigo-400">CHROMA LINK: EXPERT</h1>
+        <p class="text-zinc-500 text-sm italic">"거울로 빛을 굴절시켜 외곽의 타겟 색상을 맞추세요."</p>
     </div>
 
-    <div id="grid-container" class="grid grid-cols-5 gap-2 bg-zinc-800 p-4 rounded-xl shadow-2xl">
+    <div id="game-board" class="grid-wrapper bg-zinc-900 p-6 rounded-2xl shadow-2xl border border-zinc-800">
         </div>
 
-    <div class="mt-10 grid grid-cols-3 gap-8 text-center bg-zinc-800 p-6 rounded-lg">
-        <div>
-            <div id="target-display" class="w-16 h-16 rounded-full mx-auto mb-2 border-4 border-white shadow-lg" style="background-color: magenta;"></div>
-            <p class="text-sm font-bold uppercase" id="target-name">목표: 보라(Magenta)</p>
-        </div>
-        <div class="flex flex-col justify-center">
-            <span class="text-2xl font-bold" id="status-icon">❓</span>
-            <p id="status-text" class="text-sm">색상 일치 확인 중</p>
-        </div>
-        <div class="text-left text-xs text-zinc-400">
-            <p>● R + B = 보라 (Magenta)</p>
-            <p>● R + G = 노랑 (Yellow)</p>
-            <p>● G + B = 청록 (Cyan)</p>
-            <p>● R + G + B = 흰색 (White)</p>
-        </div>
+    <div class="mt-8 flex gap-4">
+        <button onclick="changeTool('R')" class="px-4 py-2 bg-red-600 rounded-lg font-bold">R 광원</button>
+        <button onclick="changeTool('G')" class="px-4 py-2 bg-green-600 rounded-lg font-bold">G 광원</button>
+        <button onclick="changeTool('B')" class="px-4 py-2 bg-blue-600 rounded-lg font-bold">B 광원</button>
+        <button onclick="changeTool('M1')" class="px-4 py-2 bg-zinc-500 rounded-lg font-bold">거울(/)</button>
+        <button onclick="changeTool('M2')" class="px-4 py-2 bg-zinc-500 rounded-lg font-bold">거울(\)</button>
+        <button onclick="resetBoard()" class="px-4 py-2 border border-zinc-700 rounded-lg">초기화</button>
     </div>
 
     <script>
-        const GRID_SIZE = 5;
-        let gridState = Array(GRID_SIZE * GRID_SIZE).fill(null);
-        const targetColor = { r: 255, g: 0, b: 255 }; // 초기 목표: 보라색
+        const SIZE = 5;
+        let currentTool = 'R';
+        let grid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+        // 외곽 타겟 (예시: 오른쪽 2번째 칸에 보라색을 만들어야 함)
+        const targets = { right: [null, 'magenta', null, 'yellow', null] };
 
-        const container = document.getElementById('grid-container');
+        function changeTool(tool) { currentTool = tool; }
 
-        function initGrid() {
-            container.innerHTML = '';
-            for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
-                const cell = document.createElement('div');
-                cell.className = 'cell bg-none rounded-md';
-                cell.addEventListener('click', () => toggleColor(i, cell));
-                container.appendChild(cell);
+        function init() {
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            
+            // 상단 빈칸 + 본체 + 하단 빈칸 로직 (간소화)
+            for(let r = -1; r <= SIZE; r++) {
+                for(let c = -1; c <= SIZE; c++) {
+                    const el = document.createElement('div');
+                    if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
+                        el.className = 'cell';
+                        el.onclick = () => placeObject(r, c);
+                        el.id = `cell-${r}-${c}`;
+                    } else if (c === SIZE && r >= 0 && r < SIZE && targets.right[r]) {
+                        el.className = 'hint';
+                        el.style.color = targets.right[r];
+                        el.innerText = 'GOAL';
+                    } else {
+                        el.className = 'hint';
+                    }
+                    board.appendChild(el);
+                }
             }
+            render();
         }
 
-        function toggleColor(index, element) {
-            const colors = [null, 'red', 'green', 'blue'];
-            let currentIdx = colors.indexOf(gridState[index]);
-            let nextIdx = (currentIdx + 1) % colors.length;
-            
-            gridState[index] = colors[nextIdx];
-            
-            // UI 업데이트
-            element.className = `cell rounded-md bg-${colors[nextIdx] || 'none'}`;
-            element.innerText = colors[nextIdx] ? colors[nextIdx][0].toUpperCase() : '';
-            
-            calculateLight();
+        function placeObject(r, c) {
+            grid[r][c] = grid[r][c] === currentTool ? null : currentTool;
+            render();
         }
 
-        function calculateLight() {
-            let mixed = { r: 0, g: 0, b: 0 };
-            
-            gridState.forEach(color => {
-                if (color === 'red') mixed.r = 255;
-                if (color === 'green') mixed.g = 255;
-                if (color === 'blue') mixed.b = 255;
-            });
-
-            checkWin(mixed);
-        }
-
-        function checkWin(mixed) {
-            const statusIcon = document.getElementById('status-icon');
-            const statusText = document.getElementById('status-text');
-            
-            if (mixed.r === targetColor.r && mixed.g === targetColor.g && mixed.b === targetColor.b) {
-                statusIcon.innerText = '✅';
-                statusText.innerText = '성공! 빛이 연결되었습니다.';
-                statusText.className = 'text-sm text-green-400 font-bold';
-            } else {
-                statusIcon.innerText = '❌';
-                statusText.innerText = '색상이 맞지 않습니다.';
-                statusText.className = 'text-sm text-red-400';
+        function render() {
+            // 모든 셀 초기화
+            for(let r=0; r<SIZE; r++) {
+                for(let c=0; c<SIZE; c++) {
+                    const el = document.getElementById(`cell-${r}-${c}`);
+                    el.innerHTML = '';
+                    const obj = grid[r][c];
+                    if(obj === 'R') el.innerHTML = '<div class="w-6 h-6 rounded-full bg-red-500 shadow-[0_0_15px_red]"></div>';
+                    if(obj === 'G') el.innerHTML = '<div class="w-6 h-6 rounded-full bg-green-500 shadow-[0_0_15px_green]"></div>';
+                    if(obj === 'B') el.innerHTML = '<div class="w-6 h-6 rounded-full bg-blue-500 shadow-[0_0_15px_blue]"></div>';
+                    if(obj === 'M1') el.innerHTML = '<div class="mirror-slash"></div>';
+                    if(obj === 'M2') el.innerHTML = '<div class="mirror-backslash"></div>';
+                }
             }
+            checkLogic();
         }
 
-        initGrid();
+        function checkLogic() {
+            // 여기에 빛의 경로 추적(Raycasting) 및 거울 반사 로직을 구현합니다.
+            // 성공 시 '성공!' 알림 출력
+        }
+
+        init();
     </script>
 </body>
 </html>

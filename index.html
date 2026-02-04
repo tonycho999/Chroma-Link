@@ -30,6 +30,7 @@
         .cell.filled { background: #4facfe; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
         .cell.correct { background: #00f260 !important; }
         .cell.wrong { background: #ff416c !important; }
+        .cell.empty { background: #222; }
 
         /* 컨트롤 패널 */
         #controls {
@@ -64,16 +65,25 @@
             pointer-events: none; user-select: none;
         }
 
-        /* 에러 메시지 표시용 (디버깅) */
-        #error-log {
-            position: absolute; bottom: 10px; left: 10px; color: #ff416c;
-            background: rgba(0,0,0,0.8); padding: 10px; z-index: 9999;
-            display: none; font-family: monospace; max-width: 500px;
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 24px; font-weight: bold; color: #4facfe;
+            background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px;
+            pointer-events: none; z-index: 999;
         }
     </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
-    <div id="error-log"></div>
+    <div id="loading">Loading 3D Engine...</div>
 
     <div class="guide">
         <strong>🎮 조작법</strong><br>
@@ -110,16 +120,8 @@
     <div id="canvas-container"></div>
 
     <script type="module">
-        // 에러 캐치 시스템
-        window.onerror = function(msg, source, lineno, colno, error) {
-            const el = document.getElementById('error-log');
-            el.style.display = 'block';
-            el.innerHTML += `ERROR: ${msg}<br>`;
-        };
-
-        // esm.sh를 사용하여 안정적인 모듈 로딩
-        import * as THREE from 'https://esm.sh/three@0.160.0';
-        import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // --- 전역 변수 ---
         const GRID_SIZE = 3;
@@ -133,14 +135,14 @@
         const mouse = new THREE.Vector2();
 
         // --- 초기화 및 실행 ---
-        // DOM이 로드된 후 실행 보장
         try {
             init();
             animate();
-        } catch (e) {
-            console.error(e);
-            document.getElementById('error-log').style.display = 'block';
-            document.getElementById('error-log').innerText = "초기화 에러: " + e.message;
+            document.getElementById('loading').style.display = 'none'; // 로딩 완료 시 숨김
+        } catch (error) {
+            console.error(error);
+            document.getElementById('loading').innerText = "Error: " + error.message;
+            document.getElementById('loading').style.color = "#ff416c";
         }
 
         function init() {
@@ -154,11 +156,11 @@
             camera.lookAt(0, 0, 0);
 
             // 렌더러
-            const canvasContainer = document.getElementById('canvas-container');
+            const container = document.getElementById('canvas-container');
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
-            canvasContainer.appendChild(renderer.domElement);
+            container.appendChild(renderer.domElement);
 
             // 조명
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -175,14 +177,14 @@
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('pointerdown', onMouseClick);
             
-            // 버튼 이벤트 연결
-            const btnNew = document.getElementById('btn-new');
-            const btnReset = document.getElementById('btn-reset');
-            
-            if(btnNew) btnNew.addEventListener('click', initGame);
-            if(btnReset) btnReset.addEventListener('click', clearGrid);
+            document.getElementById('btn-new').addEventListener('click', initGame);
+            document.getElementById('btn-reset').addEventListener('click', clearGrid);
 
-            // 게임 시작
+            // 데이터 구조 초기화 (중요: undefined 방지)
+            resetPlayerGrid();
+            targetData = createEmptyGrid();
+            
+            // 첫 게임 시작
             initGame();
         }
 
@@ -205,11 +207,14 @@
         function generateRandomTarget() {
             targetData = createEmptyGrid();
             let count = 0;
-            // 최소 3개 이상의 블록이 있도록 보장
-            let attempts = 0;
-            while(count < 3 && attempts < 100) {
+            // 100번 시도하여 최소 3개 이상의 블록 생성
+            for(let attempt=0; attempt<100; attempt++) {
+                if(count >= 3) break;
+                
+                // 다시 초기화 후 시도
+                targetData = createEmptyGrid();
                 count = 0;
-                targetData = createEmptyGrid(); // 리셋
+                
                 for(let x=0; x<GRID_SIZE; x++){
                     for(let y=0; y<GRID_SIZE; y++){
                         for(let z=0; z<GRID_SIZE; z++){
@@ -220,7 +225,6 @@
                         }
                     }
                 }
-                attempts++;
             }
         }
 
@@ -257,11 +261,16 @@
         }
 
         function getShadowMap(data, viewType) {
+            // 안전장치: 데이터가 없으면 빈 맵 반환
+            if (!data) return Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+
             let map = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            
             for(let x=0; x<GRID_SIZE; x++){
                 for(let y=0; y<GRID_SIZE; y++){
                     for(let z=0; z<GRID_SIZE; z++){
-                        if(data[x][y][z] === 1) {
+                        // 배열 범위 체크 (undefined 에러 방지)
+                        if (data[x] && data[x][y] && data[x][y][z] === 1) {
                             if(viewType === 'top') map[z][x] = 1;
                             if(viewType === 'front') map[y][x] = 1;
                             if(viewType === 'side') map[y][z] = 1;
@@ -279,7 +288,6 @@
 
             const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
             const filledMaterial = new THREE.MeshLambertMaterial({ color: 0x4facfe });
-            // 투명도 조정 (조금 더 잘 보이게)
             const emptyMaterial = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.2, wireframe: true });
             
             const offset = (GRID_SIZE - 1) / 2;
@@ -311,7 +319,6 @@
         function onMouseClick(event) {
             if (event.target.closest('#ui-layer') || event.target.closest('#controls')) return;
 
-            // 마우스 좌표 정규화
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -322,7 +329,6 @@
                 const object = intersects[0].object;
                 const { x, y, z, isFilled } = object.userData;
                 
-                // 좌클릭 시 토글
                 gridData[x][y][z] = isFilled ? 0 : 1;
                 renderGrid();
                 updateUI();
@@ -331,6 +337,9 @@
         }
 
         function updateUI() {
+            // 데이터가 준비되지 않았으면 중단
+            if (!targetShadows.top || targetShadows.top.length === 0) return;
+
             const pShadows = calculatePlayerShadows();
             drawGridUI('grid-top', targetShadows.top, pShadows.top);
             drawGridUI('grid-front', targetShadows.front, pShadows.front);
@@ -342,7 +351,6 @@
             if(!container) return;
             container.innerHTML = '';
             
-            // 뷰에 따른 순서 조정 (UI와 3D 좌표 일치)
             for (let r = 0; r < GRID_SIZE; r++) {
                 for (let c = 0; c < GRID_SIZE; c++) {
                     const div = document.createElement('div');
@@ -351,10 +359,8 @@
                     let tVal, pVal;
 
                     if (elementId === 'grid-top') {
-                        // Top: 일반 행렬 순서 (z, x)
                         tVal = targetS[r][c]; pVal = playerS[r][c];
                     } else {
-                        // Front/Side: UI는 위에서 아래로 그리지만, 3D Y좌표는 아래(0)에서 위(2)
                         const invR = (GRID_SIZE - 1) - r;
                         tVal = targetS[invR][c]; pVal = playerS[invR][c];
                     }

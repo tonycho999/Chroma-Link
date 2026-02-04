@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>Chroma Link - Full Logic Engine</title>
+    <title>Chroma Link - Level System</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root { --cell-size: 60px; }
@@ -10,47 +10,59 @@
             display: grid; 
             grid-template-columns: 50px repeat(5, var(--cell-size)) 50px; 
             grid-template-rows: 50px repeat(5, var(--cell-size)) 50px;
-            gap: 2px; background: #111; padding: 10px; border-radius: 15px;
+            gap: 2px; background: #111; padding: 10px; border-radius: 15px; position: relative;
         }
-        .cell { width: var(--cell-size); height: var(--cell-size); background: #222; position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid #333; }
-        .outer { display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; color: #555; }
-        .mirror-1 { width: 80%; height: 4px; background: #ddd; transform: rotate(-45deg); box-shadow: 0 0 10px white; }
-        .mirror-2 { width: 80%; height: 4px; background: #ddd; transform: rotate(45deg); box-shadow: 0 0 10px white; }
-        .beam { position: absolute; pointer-events: none; z-index: 5; opacity: 0.8; }
-        .active-goal { border: 3px solid white; box-shadow: 0 0 15px white; }
+        .cell { width: var(--cell-size); height: var(--cell-size); background: #222; position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid #333; z-index: 10; }
+        .outer { display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 10px; z-index: 5; }
+        .mirror-1 { width: 80%; height: 4px; background: #eee; transform: rotate(-45deg); box-shadow: 0 0 10px white; }
+        .mirror-2 { width: 80%; height: 4px; background: #eee; transform: rotate(45deg); box-shadow: 0 0 10px white; }
+        /* 빛의 궤적 스타일 */
+        .beam-path { position: absolute; pointer-events: none; z-index: 2; mix-blend-mode: screen; transition: all 0.2s; }
+        .active-goal { border: 3px solid white; box-shadow: 0 0 20px white; transform: scale(1.1); }
     </style>
 </head>
 <body class="bg-zinc-950 text-white min-h-screen flex flex-col items-center py-8">
 
-    <div class="text-center mb-6">
-        <h1 class="text-3xl font-black text-indigo-400 tracking-tighter">CHROMA LINK ENGINE</h1>
-        <p class="text-zinc-500 italic text-sm">빛을 굴절시켜 오른쪽 목표를 채우세요!</p>
+    <div class="text-center mb-4">
+        <h1 id="level-title" class="text-3xl font-black text-indigo-400">LEVEL 1: 시작</h1>
+        <p id="level-desc" class="text-zinc-500 text-sm">기초 혼합: 보라색을 만드세요.</p>
     </div>
 
     <div id="board" class="grid-container border border-zinc-800 shadow-2xl"></div>
 
+    <div id="beam-layer" class="absolute inset-0 pointer-events-none"></div>
+
     <div class="mt-8 flex flex-wrap justify-center gap-3">
-        <button onclick="setTool('R')" class="px-4 py-2 bg-red-600 rounded-md font-bold hover:scale-105 transition">Red</button>
-        <button onclick="setTool('G')" class="px-4 py-2 bg-green-600 rounded-md font-bold hover:scale-105 transition">Green</button>
-        <button onclick="setTool('B')" class="px-4 py-2 bg-blue-600 rounded-md font-bold hover:scale-105 transition">Blue</button>
-        <button onclick="setTool('M1')" class="px-4 py-2 bg-zinc-600 rounded-md font-bold hover:scale-105 transition">거울(/)</button>
-        <button onclick="setTool('M2')" class="px-4 py-2 bg-zinc-600 rounded-md font-bold hover:scale-105 transition">거울(\)</button>
-        <button onclick="showAnswer()" class="px-4 py-2 bg-yellow-600 text-black rounded-md font-black hover:bg-yellow-400 transition">💡 정답 보기</button>
-        <button onclick="resetGame()" class="px-4 py-2 border border-zinc-600 rounded-md hover:bg-zinc-800">초기화</button>
+        <button onclick="setTool('R')" class="px-4 py-2 bg-red-600 rounded-md font-bold">Red</button>
+        <button onclick="setTool('G')" class="px-4 py-2 bg-green-600 rounded-md font-bold">Green</button>
+        <button onclick="setTool('B')" class="px-4 py-2 bg-blue-600 rounded-md font-bold">Blue</button>
+        <button onclick="setTool('M1')" class="px-4 py-2 bg-zinc-600 rounded-md font-bold">거울(/)</button>
+        <button onclick="setTool('M2')" class="px-4 py-2 bg-zinc-600 rounded-md font-bold">거울(\)</button>
+    </div>
+
+    <div class="mt-6 flex gap-4">
+        <button onclick="showAnswer()" class="text-yellow-500 font-bold underline">💡 정답 보기</button>
+        <button onclick="nextLevel()" class="px-6 py-2 bg-indigo-600 rounded-full font-black hover:bg-indigo-500">다음 레벨 ▶</button>
     </div>
 
     <script>
         const SIZE = 5;
-        let tool = 'R';
-        let grid = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
-        // 목표: 오른쪽 3번째 칸에 '보라색(Magenta)' 만들기
-        const goals = { right: [null, null, {r:255, g:0, b:255, name:'Magenta'}, null, null] };
-
-        function setTool(t) { tool = t; }
+        let tool = 'R', currentLevel = 0, grid = [];
+        
+        const levels = [
+            { title: "LEVEL 1: 기초", desc: "보라색(R+B)을 타겟에 맞추세요.", target: {r:2, c:SIZE, color:'magenta', rgb:[255,0,255]} },
+            { title: "LEVEL 2: 굴절", desc: "거울을 사용해 빛을 꺾어 노란색(R+G)을 만드세요.", target: {r:4, c:SIZE, color:'yellow', rgb:[255,255,0]} },
+            { title: "LEVEL 3: 화이트 아웃", desc: "모든 빛을 한곳으로 모아 흰색을 만드세요.", target: {r:0, c:SIZE, color:'white', rgb:[255,255,255]} }
+        ];
 
         function init() {
             const board = document.getElementById('board');
             board.innerHTML = '';
+            const lv = levels[currentLevel];
+            document.getElementById('level-title').innerText = lv.title;
+            document.getElementById('level-desc').innerText = lv.desc;
+            grid = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
+
             for(let r=-1; r<=SIZE; r++) {
                 for(let c=-1; c<=SIZE; c++) {
                     const cell = document.createElement('div');
@@ -58,14 +70,11 @@
                         cell.className = 'cell';
                         cell.id = `c-${r}-${c}`;
                         cell.onclick = () => { grid[r][c] = (grid[r][c] === tool) ? null : tool; render(); };
-                    } else {
-                        cell.className = 'outer';
-                        if(c === SIZE && r >= 0 && r < SIZE && goals.right[r]) {
-                            cell.id = `goal-r-${r}`;
-                            cell.style.backgroundColor = 'rgba(255,0,255,0.2)';
-                            cell.innerText = 'GOAL';
-                        }
-                    }
+                    } else if (r === lv.target.r && c === lv.target.c) {
+                        cell.className = 'outer border-2 border-dashed border-zinc-700';
+                        cell.id = 'goal-target';
+                        cell.innerText = 'GOAL';
+                    } else { cell.className = 'outer'; }
                     board.appendChild(cell);
                 }
             }
@@ -73,78 +82,58 @@
         }
 
         function render() {
-            // UI 초기화
             document.querySelectorAll('.cell').forEach(c => {
-                c.innerHTML = '';
                 const [_, r, col] = c.id.split('-').map(Number);
                 const obj = grid[r][col];
-                if(obj === 'R') c.innerHTML = '<div class="w-6 h-6 rounded-full bg-red-500 shadow-[0_0_10px_red]"></div>';
-                if(obj === 'G') c.innerHTML = '<div class="w-6 h-6 rounded-full bg-green-500 shadow-[0_0_10px_green]"></div>';
-                if(obj === 'B') c.innerHTML = '<div class="w-6 h-6 rounded-full bg-blue-500 shadow-[0_0_10px_blue]"></div>';
-                if(obj === 'M1') c.innerHTML = '<div class="mirror-1"></div>';
-                if(obj === 'M2') c.innerHTML = '<div class="mirror-2"></div>';
+                c.innerHTML = obj ? `<div class="${obj.startsWith('M') ? (obj==='M1'?'mirror-1':'mirror-2') : 'w-6 h-6 rounded-full shadow-lg'}" style="background-color: ${obj==='R'?'red':obj==='G'?'green':obj==='B'?'blue':''}"></div>` : '';
             });
-            calculateBeams();
+            calculateLogic();
         }
 
-        function calculateBeams() {
-            let hits = Array.from({length: SIZE}, () => ({r:0, g:0, b:0}));
-
+        function calculateLogic() {
+            const lv = levels[currentLevel];
+            let hitColor = {r:0, g:0, b:0};
+            // 빛 그리기 로직 (단순화된 시뮬레이션)
             for(let r=0; r<SIZE; r++) {
                 for(let c=0; c<SIZE; c++) {
-                    const item = grid[r][c];
-                    if(['R','G','B'].includes(item)) {
-                        // 광원 발견 시 4방향 조사 (이 샘플에선 오른쪽만 투사 예시)
-                        traceRay(r, c, 0, 1, item, hits); 
+                    if(['R','G','B'].includes(grid[r][c])) {
+                        let cr = r, cc = c, dr = 0, dc = 1; // 기본 오른쪽 발사
+                        let color = grid[r][c];
+                        while(cc <= SIZE) {
+                            if(cc === lv.target.c && cr === lv.target.r) {
+                                if(color === 'R') hitColor.r = 255;
+                                if(color === 'G') hitColor.g = 255;
+                                if(color === 'B') hitColor.b = 255;
+                            }
+                            if(cc < SIZE && grid[cr][cc] === 'M1') { [dr, dc] = [-dc, -dr]; }
+                            if(cc < SIZE && grid[cr][cc] === 'M2') { [dr, dc] = [dc, dr]; }
+                            cc += dc; cr += dr;
+                            if(cr < 0 || cr >= SIZE) break;
+                        }
                     }
                 }
             }
-
-            // 승리 체크
-            goals.right.forEach((g, idx) => {
-                if(!g) return;
-                const hit = hits[idx];
-                const goalEl = document.getElementById(`goal-r-${idx}`);
-                if(hit.r === g.r && hit.b === g.b) {
-                    goalEl.style.backgroundColor = `rgb(${g.r},${g.g},${g.b})`;
-                    goalEl.classList.add('active-goal');
-                } else {
-                    goalEl.style.backgroundColor = 'rgba(255,0,255,0.2)';
-                    goalEl.classList.remove('active-goal');
-                }
-            });
-        }
-
-        function traceRay(r, c, dr, dc, color, hits) {
-            let currR = r, currC = c;
-            while(true) {
-                currR += dr; currC += dc;
-                if(currR < 0 || currR >= SIZE || currC < 0 || currC >= SIZE) {
-                    if(currC === SIZE && currR >= 0 && currR < SIZE) {
-                        if(color === 'R') hits[currR].r = 255;
-                        if(color === 'B') hits[currR].b = 255;
-                    }
-                    break;
-                }
-                // 거울 로직
-                if(grid[currR][currC] === 'M1') { [dr, dc] = [-dc, -dr]; }
-                if(grid[currR][currC] === 'M2') { [dr, dc] = [dc, dr]; }
+            const goal = document.getElementById('goal-target');
+            if(hitColor.r === lv.target.rgb[0] && hitColor.g === lv.target.rgb[1] && hitColor.b === lv.target.rgb[2]) {
+                goal.style.backgroundColor = lv.target.color;
+                goal.classList.add('active-goal');
+            } else {
+                goal.style.backgroundColor = 'transparent';
+                goal.classList.remove('active-goal');
             }
         }
 
         function showAnswer() {
-            resetGame();
-            grid[2][0] = 'R'; // 2행 0열에 빨강
-            grid[2][2] = 'B'; // 2행 2열에 파랑 (직선으로 도달)
-            render();
-            alert("정답: 빨강과 파랑 광원을 3번째 행(Row)에 나란히 두면 보라색이 완성됩니다!");
+            if(currentLevel === 0) alert("정답: 같은 행(Row)에 빨강과 파랑 광원을 두세요.");
+            if(currentLevel === 1) alert("정답: 광원을 다른 줄에 두고 거울(\\)을 사용해 목표 줄로 꺾으세요.");
         }
 
-        function resetGame() {
-            grid = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
-            render();
+        function nextLevel() {
+            currentLevel = (currentLevel + 1) % levels.length;
+            init();
         }
 
+        function setTool(t) { tool = t; }
         init();
     </script>
 </body>

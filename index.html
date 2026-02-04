@@ -2,312 +2,473 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>Chroma Link - Challenge Logic</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Shadow Builder: 3D Nonogram</title>
     <style>
-        :root { --cell-size: 50px; }
-        .game-area { display: flex; flex-direction: column; align-items: center; gap: 20px; }
-        .grid-container { 
-            display: grid; 
-            grid-template-columns: repeat(5, var(--cell-size)); 
-            grid-template-rows: repeat(5, var(--cell-size));
-            gap: 4px; background: #18181b; padding: 10px; border-radius: 12px;
-            position: relative;
-        }
-        .cell { 
-            width: var(--cell-size); height: var(--cell-size); 
-            background: #27272a; border-radius: 4px; border: 1px solid #3f3f46;
-            display: flex; align-items: center; justify-content: center; 
-            cursor: pointer; position: relative; z-index: 10;
-        }
-        .wall { background: #52525b; cursor: not-allowed; border: 1px solid #71717a; }
-        /* 도구 스타일 */
-        .mirror-1 { width: 70%; height: 4px; background: #e4e4e7; transform: rotate(-45deg); box-shadow: 0 0 8px white; }
-        .mirror-2 { width: 70%; height: 4px; background: #e4e4e7; transform: rotate(45deg); box-shadow: 0 0 8px white; }
-        .light-src { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', sans-serif; color: white; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
         
-        /* 빔 레이어 */
-        .beam-layer { position: absolute; inset: 0; pointer-events: none; z-index: 5; mix-blend-mode: screen; }
-        .beam-segment { position: absolute; background: white; opacity: 0.6; }
+        /* UI 패널 */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 220px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            pointer-events: none; /* 캔버스 클릭 방해 금지 */
+        }
 
-        .tool-btn { position: relative; transition: all 0.2s; }
-        .tool-btn.active { ring: 2px solid white; transform: scale(1.1); }
-        .badge { position: absolute; top: -5px; right: -5px; background: red; color: white; font-size: 10px; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;}
+        h2 { margin: 0 0 15px 0; font-size: 18px; text-align: center; color: #4facfe; }
+        .hint-section { margin-bottom: 20px; pointer-events: auto; }
+        .hint-label { font-size: 12px; margin-bottom: 5px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* 그리드 스타일 */
+        .grid-display {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            width: 100%;
+            aspect-ratio: 1;
+            background: #333;
+            border: 2px solid #555;
+        }
+        
+        .cell {
+            background: #222;
+            transition: background 0.2s;
+        }
+        
+        /* 셀 상태 색상 */
+        .cell.target { background: #444; } /* 목표 (어두운 회색) */
+        .cell.filled { background: #4facfe; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); } /* 플레이어가 채움 (파란색) */
+        .cell.correct { background: #00f260 !important; } /* 정답 일치 (초록색) */
+        .cell.wrong { background: #ff416c !important; } /* 오답 (빨간색) */
+
+        /* 컨트롤 패널 */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        button {
+            background: #4facfe;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+        button.reset { background: #ff416c; }
+
+        #win-message {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 242, 96, 0.9);
+            color: #000;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            font-size: 2em;
+            font-weight: bold;
+            display: none;
+            box-shadow: 0 0 30px rgba(0, 242, 96, 0.6);
+            z-index: 100;
+        }
+
+        .guide {
+            position: absolute;
+            top: 20px; left: 20px;
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            pointer-events: none;
+        }
     </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
-<body class="bg-black text-white min-h-screen flex flex-col items-center justify-center font-sans">
+<body>
 
-    <div class="text-center mb-6 max-w-md">
-        <div class="flex justify-between items-center mb-2">
-            <h1 id="level-name" class="text-2xl font-black text-indigo-400">LEVEL 1</h1>
-            <span id="level-goal" class="text-xs bg-zinc-800 px-2 py-1 rounded text-magenta-500">목표: 보라색 만들기</span>
-        </div>
-        <p id="level-hint" class="text-zinc-500 text-sm mb-4">"벽을 피해 거울로 빛을 반사시키세요."</p>
+    <div class="guide">
+        <strong>🎮 조작법</strong><br>
+        - 좌클릭: 블록 생성 / 삭제<br>
+        - 우클릭 드래그: 카메라 회전<br>
+        - 휠: 줌 인/아웃<br>
+        <br>
+        <strong>목표:</strong> 오른쪽 힌트(그림자)와<br>일치하도록 블록을 쌓으세요.
     </div>
 
-    <div class="game-area">
-        <div class="relative">
-            <div id="board" class="grid-container border border-zinc-700"></div>
-            <div id="beam-visuals" class="beam-layer"></div>
+    <div id="ui-layer">
+        <h2>SHADOW HINTS</h2>
+        
+        <div class="hint-section">
+            <div class="hint-label">TOP (위에서 본 모습)</div>
+            <div id="grid-top" class="grid-display"></div>
         </div>
 
-        <div class="flex gap-4 bg-zinc-900 p-4 rounded-xl border border-zinc-800" id="toolbar">
-            </div>
+        <div class="hint-section">
+            <div class="hint-label">FRONT (정면 모습)</div>
+            <div id="grid-front" class="grid-display"></div>
+        </div>
 
-        <div id="status-msg" class="h-6 text-sm font-bold text-center text-zinc-400">배치를 시작하세요.</div>
-
-        <div class="flex gap-4 mt-2">
-            <button onclick="resetLevel()" class="text-xs text-zinc-500 hover:text-white underline">다시 하기</button>
-            <button onclick="checkWin()" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-lg font-bold text-sm transition">결과 확인</button>
+        <div class="hint-section">
+            <div class="hint-label">SIDE (우측면 모습)</div>
+            <div id="grid-side" class="grid-display"></div>
         </div>
     </div>
 
-    <script>
-        const SIZE = 5;
-        // 레벨 데이터: map (0:빈칸, 9:벽), inventory (사용 가능 개수), target (목표 좌표 및 색)
-        const levels = [
-            {
-                id: 1,
-                name: "벽 너머의 빛",
-                hint: "벽 때문에 직진할 수 없습니다. 거울을 사용해 우회하세요.",
-                map: [
-                    [0,0,0,0,0],
-                    [0,9,9,9,0],
-                    [0,0,0,0,0], // 목표는 이 라인 오른쪽 끝
-                    [0,0,0,0,0],
-                    [0,0,0,0,0]
-                ],
-                inventory: { R:1, B:1, M2:2 }, // 빨강1, 파랑1, 거울(\) 2개만 줌
-                target: { row: 2, color: 'magenta', needed: ['R', 'B'] } 
-            },
-            {
-                id: 2,
-                name: "교차로",
-                hint: "두 빛이 한 점(가운데)에서 만나 노란색이 되어야 합니다.",
-                map: [
-                    [0,0,0,0,0],
-                    [0,0,9,0,0],
-                    [0,0,0,0,0], // 가운데 2,2 지점이 목표
-                    [0,0,9,0,0],
-                    [0,0,0,0,0]
-                ],
-                inventory: { R:1, G:1, M1:1, M2:1 },
-                target: { row: 2, col: 2, color: 'yellow', needed: ['R', 'G'] } // 이번엔 격자 내부가 목표
+    <div id="controls">
+        <button onclick="window.initGame()">새 게임 (New)</button>
+        <button class="reset" onclick="window.clearGrid()">초기화 (Reset)</button>
+    </div>
+
+    <div id="win-message">🎉 PERFECT SHADOW! 🎉<br><span style="font-size:0.5em">Next Stage? Click New Game</span></div>
+
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 전역 설정 ---
+        const GRID_SIZE = 3;
+        let scene, camera, renderer, controls;
+        let cubes = []; // 3D 메쉬 저장
+        let gridData = []; // 현재 플레이어 그리드 (0 or 1)
+        let targetData = []; // 정답(목표) 그리드 (숨겨짐)
+        
+        // 그림자 힌트 데이터
+        let targetShadows = { top: [], front: [], side: [] };
+        
+        // 레이캐스팅 (마우스 클릭 감지)
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // 초기화 실행
+        init();
+        animate();
+
+        function init() {
+            // 씬 설정
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x202025);
+
+            // 카메라
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(6, 5, 6);
+            camera.lookAt(0, 0, 0);
+
+            // 렌더러
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // 조명
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // 컨트롤
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // 베이스 그리드 (바닥판 느낌)
+            const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x555555, 0x333333);
+            gridHelper.position.set(0, -0.5, 0); // 큐브 중심 맞추기 위해 조정
+            // scene.add(gridHelper); // 깔끔하게 보이기 위해 생략 가능
+
+            // 입력 이벤트
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('pointerdown', onMouseClick);
+
+            // 게임 로직 시작
+            initGame();
+        }
+
+        // --- 게임 로직 ---
+
+        window.initGame = function() {
+            document.getElementById('win-message').style.display = 'none';
+            
+            // 1. 랜덤 정답 생성
+            generateRandomTarget();
+
+            // 2. 목표 그림자 계산
+            calculateTargetShadows();
+
+            // 3. 플레이어 그리드 초기화 (빈 공간)
+            resetPlayerGrid();
+
+            // 4. 3D 씬 다시 그리기
+            renderGrid();
+            
+            // 5. UI 업데이트
+            updateUI();
+        }
+
+        window.clearGrid = function() {
+            resetPlayerGrid();
+            renderGrid();
+            updateUI();
+        }
+
+        function generateRandomTarget() {
+            targetData = createEmptyGrid();
+            // 랜덤하게 채우되, 너무 쉽거나 꽉 차지 않게 (30~60% 확률)
+            for(let x=0; x<GRID_SIZE; x++){
+                for(let y=0; y<GRID_SIZE; y++){
+                    for(let z=0; z<GRID_SIZE; z++){
+                        if(Math.random() > 0.5) targetData[x][y][z] = 1;
+                    }
+                }
             }
-        ];
-
-        let currentLevelIdx = 0;
-        let grid = [];     // 현재 배치 상태
-        let inventory = {}; // 현재 남은 자원
-        let selectedTool = null;
-
-        function startLevel(idx) {
-            currentLevelIdx = idx;
-            const lv = levels[idx];
-            
-            // 깊은 복사로 상태 초기화
-            grid = lv.map.map(row => row.map(cell => cell === 9 ? 'WALL' : null));
-            inventory = { ...lv.inventory };
-            selectedTool = Object.keys(inventory)[0]; // 첫 도구 자동 선택
-
-            document.getElementById('level-name').innerText = lv.name;
-            document.getElementById('level-hint').innerText = lv.hint;
-            
-            renderBoard();
-            renderToolbar();
-            traceBeams(); // 초기 빔 계산 (아무것도 없어도)
         }
 
-        function renderToolbar() {
-            const bar = document.getElementById('toolbar');
-            bar.innerHTML = '';
-            Object.keys(inventory).forEach(key => {
-                // 재고가 0이어도 버튼은 보여주되 비활성 처리 가능 (여기선 숨기지 않음)
-                const btn = document.createElement('button');
-                btn.className = `tool-btn w-10 h-10 bg-zinc-700 rounded flex items-center justify-center ${selectedTool === key ? 'active bg-zinc-600' : ''}`;
-                btn.onclick = () => { selectedTool = key; renderToolbar(); };
-                
-                // 아이콘 표시
-                let icon = '';
-                if(key==='R') icon = '<div class="w-4 h-4 rounded-full bg-red-500"></div>';
-                else if(key==='G') icon = '<div class="w-4 h-4 rounded-full bg-green-500"></div>';
-                else if(key==='B') icon = '<div class="w-4 h-4 rounded-full bg-blue-500"></div>';
-                else if(key==='M1') icon = '<div class="mirror-1 w-6"></div>';
-                else if(key==='M2') icon = '<div class="mirror-2 w-6"></div>';
-                
-                btn.innerHTML = `${icon} <div class="badge">${inventory[key]}</div>`;
-                bar.appendChild(btn);
-            });
+        function createEmptyGrid() {
+            let arr = [];
+            for(let x=0; x<GRID_SIZE; x++){
+                arr[x] = [];
+                for(let y=0; y<GRID_SIZE; y++){
+                    arr[x][y] = [];
+                    for(let z=0; z<GRID_SIZE; z++){
+                        arr[x][y][z] = 0;
+                    }
+                }
+            }
+            return arr;
         }
 
-        function renderBoard() {
-            const board = document.getElementById('board');
-            board.innerHTML = '';
+        function resetPlayerGrid() {
+            gridData = createEmptyGrid();
+        }
+
+        function calculateTargetShadows() {
+            // 초기화
+            targetShadows.top = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            targetShadows.front = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            targetShadows.side = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+
+            for(let x=0; x<GRID_SIZE; x++){
+                for(let y=0; y<GRID_SIZE; y++){
+                    for(let z=0; z<GRID_SIZE; z++){
+                        if(targetData[x][y][z] === 1) {
+                            targetShadows.top[z][x] = 1;   // 위에서 보면 XZ 평면 (Z가 행, X가 열)
+                            targetShadows.front[y][x] = 1; // 정면은 XY 평면 (Y가 행, X가 열 - 주의: Y는 아래에서 위로)
+                            targetShadows.side[y][z] = 1;  // 측면은 ZY 평면
+                        }
+                    }
+                }
+            }
+        }
+
+        function calculatePlayerShadows() {
+            let shadows = {
+                top: Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0)),
+                front: Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0)),
+                side: Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0))
+            };
+
+            for(let x=0; x<GRID_SIZE; x++){
+                for(let y=0; y<GRID_SIZE; y++){
+                    for(let z=0; z<GRID_SIZE; z++){
+                        if(gridData[x][y][z] === 1) {
+                            shadows.top[z][x] = 1;
+                            shadows.front[y][x] = 1;
+                            shadows.side[y][z] = 1;
+                        }
+                    }
+                }
+            }
+            return shadows;
+        }
+
+        // --- 렌더링 및 인터랙션 ---
+
+        function renderGrid() {
+            // 기존 큐브 제거
+            cubes.forEach(mesh => scene.remove(mesh));
+            cubes = [];
+
+            // 투명한 "히트박스" (클릭 감지용)와 실제 "블록" 생성
+            const geometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+            const filledMaterial = new THREE.MeshLambertMaterial({ color: 0x4facfe });
+            const emptyMaterial = new THREE.MeshBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.1, wireframe: true });
             
-            grid.forEach((row, r) => {
-                row.forEach((cell, c) => {
-                    const el = document.createElement('div');
-                    el.className = `cell ${cell === 'WALL' ? 'wall' : ''}`;
-                    
-                    // 벽이 아니면 클릭 이벤트
-                    if (cell !== 'WALL') {
-                        el.onclick = () => handleCellClick(r, c);
+            // 좌표계 중심 조정 (0,0,0이 큐브 집합의 중심이 되도록)
+            const offset = (GRID_SIZE - 1) / 2;
+
+            for(let x=0; x<GRID_SIZE; x++){
+                for(let y=0; y<GRID_SIZE; y++){
+                    for(let z=0; z<GRID_SIZE; z++){
+                        const isFilled = gridData[x][y][z] === 1;
+                        
+                        const material = isFilled ? filledMaterial : emptyMaterial;
+                        const cube = new THREE.Mesh(geometry, material);
+                        
+                        cube.position.set(x - offset, y - offset, z - offset);
+                        cube.userData = { x, y, z, isFilled }; // 데이터 바인딩
+                        
+                        scene.add(cube);
+                        cubes.push(cube);
+
+                        // 채워진 블록은 테두리 추가 (가독성)
+                        if (isFilled) {
+                            const edges = new THREE.EdgesGeometry(geometry);
+                            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+                            cube.add(line);
+                        }
+                    }
+                }
+            }
+        }
+
+        function onMouseClick(event) {
+            // UI 클릭 무시
+            if (event.target.closest('#ui-layer') || event.target.closest('#controls')) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubes);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                const { x, y, z, isFilled } = object.userData;
+
+                // 상태 토글
+                gridData[x][y][z] = isFilled ? 0 : 1;
+                
+                // 갱신
+                renderGrid();
+                updateUI();
+                checkWin();
+            }
+        }
+
+        // --- UI 업데이트 ---
+        function updateUI() {
+            const playerShadows = calculatePlayerShadows();
+            
+            drawGridUI('grid-top', targetShadows.top, playerShadows.top, true); // Top은 Z가 행(위->아래), X가 열
+            drawGridUI('grid-front', targetShadows.front, playerShadows.front, false); // Front는 Y가 행(아래->위가 아님, 보통 UI는 위->아래)
+            drawGridUI('grid-side', targetShadows.side, playerShadows.side, false);
+        }
+
+        function drawGridUI(elementId, targetS, playerS, isTopView) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = ''; // 초기화
+
+            // UI 그리드 그리기
+            // 주의: 3D 배열 인덱스와 HTML 그리드 순서 매핑
+            // Top: row=z (0..2), col=x (0..2)
+            // Front: row=y (2..0 -> 역순으로 그려야 위쪽이 y=2), col=x (0..2)
+            // Side: row=y (2..0), col=z (0..2)
+
+            const rows = GRID_SIZE;
+            const cols = GRID_SIZE;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const div = document.createElement('div');
+                    div.className = 'cell';
+
+                    // 뷰에 따른 인덱스 매핑
+                    let isTarget = false;
+                    let isPlayer = false;
+
+                    if (elementId === 'grid-top') {
+                        // Top: Grid 순서대로 z, x
+                        isTarget = targetS[r][c] === 1;
+                        isPlayer = playerS[r][c] === 1;
+                    } else if (elementId === 'grid-front') {
+                        // Front: UI 위쪽이 높은 Y. 즉 r=0일때 y=2
+                        const y = (GRID_SIZE - 1) - r; 
+                        const x = c;
+                        isTarget = targetS[y][x] === 1;
+                        isPlayer = playerS[y][x] === 1;
+                    } else if (elementId === 'grid-side') {
+                        // Side: UI 위쪽이 높은 Y.
+                        const y = (GRID_SIZE - 1) - r;
+                        const z = c;
+                        isTarget = targetS[y][z] === 1;
+                        isPlayer = playerS[y][z] === 1;
                     }
 
-                    // 아이콘 렌더링
-                    if (cell && cell !== 'WALL') {
-                        if(['R','G','B'].includes(cell)) {
-                            el.innerHTML = `<div class="light-src" style="background:${cell==='R'?'red':cell==='G'?'lime':'blue'}; color:${cell==='R'?'red':cell==='G'?'lime':'blue'}"></div>`;
-                        } else if (cell === 'M1') el.innerHTML = `<div class="mirror-1"></div>`;
-                        else if (cell === 'M2') el.innerHTML = `<div class="mirror-2"></div>`;
-                    }
-                    
-                    // 목표 지점 표시 (외곽 or 내부)
-                    const lv = levels[currentLevelIdx];
-                    if (lv.target.col === c && lv.target.row === r) {
-                        el.style.border = '2px dashed white';
-                    }
+                    // 클래스 적용
+                    if (isTarget && isPlayer) div.classList.add('correct'); // 정답
+                    else if (!isTarget && isPlayer) div.classList.add('wrong'); // 틀림 (없어야 하는데 있음)
+                    else if (isTarget && !isPlayer) div.classList.add('target'); // 목표 (채워야 함)
+                    else div.classList.add('empty'); // 둘 다 없음
 
-                    board.appendChild(el);
+                    container.appendChild(div);
+                }
+            }
+        }
+
+        function checkWin() {
+            const playerShadows = calculatePlayerShadows();
+            
+            // 모든 면 검사
+            const checkPlane = (t, p) => {
+                for(let r=0; r<GRID_SIZE; r++) {
+                    for(let c=0; c<GRID_SIZE; c++) {
+                        if(t[r][c] !== p[r][c]) return false;
+                    }
+                }
+                return true;
+            };
+
+            const winTop = checkPlane(targetShadows.top, playerShadows.top);
+            const winFront = checkPlane(targetShadows.front, playerShadows.front);
+            const winSide = checkPlane(targetShadows.side, playerShadows.side);
+
+            if (winTop && winFront && winSide) {
+                document.getElementById('win-message').style.display = 'block';
+                // 승리 효과: 전체를 초록색으로
+                cubes.forEach(c => {
+                    if(c.userData.isFilled) c.material.color.setHex(0x00f260);
                 });
-            });
-        }
-
-        function handleCellClick(r, c) {
-            const currentVal = grid[r][c];
-
-            // 1. 이미 무언가 있다면 회수 (Inventory +1)
-            if (currentVal) {
-                if (inventory[currentVal] !== undefined) inventory[currentVal]++;
-                grid[r][c] = null;
-            } 
-            // 2. 빈칸이라면 현재 툴 배치 (Inventory -1)
-            else {
-                if (inventory[selectedTool] > 0) {
-                    grid[r][c] = selectedTool;
-                    inventory[selectedTool]--;
-                } else {
-                    showMessage("재료가 부족합니다!", "text-red-500");
-                    return; // 렌더링 스킵
-                }
-            }
-            
-            renderBoard();
-            renderToolbar();
-            traceBeams();
-        }
-
-        // 빛 추적 및 시각화 (핵심 로직)
-        function traceBeams() {
-            const visualLayer = document.getElementById('beam-visuals');
-            visualLayer.innerHTML = ''; // 초기화
-            const lv = levels[currentLevelIdx];
-            
-            // 목표 지점의 히트 상태 확인용
-            let hits = new Set(); 
-
-            // 모든 광원 찾기
-            for(let r=0; r<SIZE; r++) {
-                for(let c=0; c<SIZE; c++) {
-                    if(['R','G','B'].includes(grid[r][c])) {
-                        fireRay(r, c, grid[r][c], visualLayer, hits);
-                    }
-                }
-            }
-
-            // 승리 조건 실시간 체크
-            const t = lv.target;
-            // 필요한 색상이 모두 도달했는지 확인
-            const success = t.needed.every(color => hits.has(color));
-            
-            if(success) showMessage("목표 달성! 정답입니다. 🎉", "text-green-400");
-            else showMessage("배치 중...", "text-zinc-500");
-        }
-
-        function fireRay(r, c, color, layer, hits) {
-            let cr = r, cc = c;
-            let dr = 0, dc = 1; // 기본: 오른쪽 발사
-            const maxStep = 20; // 무한루프 방지
-            
-            for(let step=0; step<maxStep; step++) {
-                // 현재 칸 중심 좌표 계산 (시각화용)
-                const x1 = cc * 54 + 27; // cell size + gap rough calc
-                const y1 = cr * 54 + 27;
-                
-                // 다음 칸 이동
-                const nr = cr + dr; 
-                const nc = cc + dc;
-                
-                // 벽이나 맵 끝이면 종료
-                if (nr < 0 || nr >= SIZE || nc < 0 || nc >= SIZE || grid[nr][nc] === 'WALL') {
-                    // 목표 지점 도달 체크 (외곽 타겟인 경우 로직 추가 필요하나 여기선 내부/경계 단순화)
-                    // 현재 로직은 '빛이 지나간 경로'가 아니라 '빛이 멈춘 곳'만 체크하지 않고
-                    // 해당 좌표가 타겟 좌표와 일치하는지 봅니다.
-                    
-                    // 외곽 목표 체크 (보드 밖으로 나가는 순간)
-                    const lv = levels[currentLevelIdx];
-                    if (!lv.target.col && nr === lv.target.row && nc === SIZE) { 
-                        // 오른쪽 끝 외곽 타겟인 경우
-                        hits.add(color);
-                    }
-                    drawBeam(layer, x1, y1, x1 + dc*25, y1 + dr*25, color); // 벽에 부딪힌 효과
-                    break;
-                }
-
-                // 이동
-                cr = nr; cc = nc;
-                const x2 = cc * 54 + 27;
-                const y2 = cr * 54 + 27;
-                
-                // 선 그리기
-                drawBeam(layer, x1, y1, x2, y2, color);
-
-                // 내부 타겟 체크
-                const lv = levels[currentLevelIdx];
-                if (lv.target.col === cc && lv.target.row === cr) {
-                    hits.add(color);
-                }
-
-                // 거울 체크 및 굴절
-                const item = grid[cr][cc];
-                if (item === 'M1') { // 슬래시 / : (0,1)->(-1,0) 위로, (0,-1)->(1,0) 아래로
-                    [dr, dc] = [-dc, -dr]; 
-                } else if (item === 'M2') { // 역슬래시 \ : (0,1)->(1,0) 아래로
-                    [dr, dc] = [dc, dr];
-                }
             }
         }
 
-        function drawBeam(layer, x1, y1, x2, y2, color) {
-            const line = document.createElement('div');
-            // CSS로 선 그리기 (회전 및 길이 계산)
-            const length = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
-            const angle = Math.atan2(y2-y1, x2-x1) * 180 / Math.PI;
-            
-            line.style.position = 'absolute';
-            line.style.left = `${x1}px`;
-            line.style.top = `${y1 - 2}px`; // 중앙 정렬 보정
-            line.style.width = `${length}px`;
-            line.style.height = '4px';
-            line.style.backgroundColor = color === 'R' ? '#ff3333' : color === 'G' ? '#33ff33' : '#3333ff';
-            line.style.transform = `rotate(${angle}deg)`;
-            line.style.transformOrigin = '0 50%';
-            line.style.borderRadius = '2px';
-            line.style.boxShadow = `0 0 8px ${line.style.backgroundColor}`;
-            
-            layer.appendChild(line);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function showMessage(msg, colorClass) {
-            const el = document.getElementById('status-msg');
-            el.innerText = msg;
-            el.className = `h-6 text-sm font-bold text-center ${colorClass}`;
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
         }
-
-        function resetLevel() { startLevel(currentLevelIdx); }
-        function checkWin() { /* 실시간 체크로 대체됨 */ }
-
-        startLevel(0); // 게임 시작
     </script>
 </body>
 </html>
